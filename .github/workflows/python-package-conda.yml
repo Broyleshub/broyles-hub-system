@@ -1,4 +1,4 @@
-name: Python Package using Conda
+          name: Python Package using Conda
 
 on: [push]
 
@@ -35,4 +35,4 @@ jobs:
         shell: bash -l {0}
         run: |
           conda install -y pytest
-          pytest          
+          pytest
