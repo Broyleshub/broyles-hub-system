@@ -7,8 +7,8 @@ on:
 
 env:
   AZURE_WEBAPP_NAME: ${{ vars.AZURE_WEBAPP_NAME || 'your-app-name' }}
-  AZURE_WEBAPP_PACKAGE_PATH: '.'
-  NODE_VERSION: '20.x'
+  AZURE_WEBAPP_PACKAGE_PATH: "."
+  NODE_VERSION: "20.x"
   ARTIFACT_NAME: node-app
   ZIP_NAME: node-app.zip
 
@@ -33,9 +33,6 @@ jobs:
   build:
     needs: validate-secrets
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node: [${{ env.NODE_VERSION }}]
     steps:
       - uses: actions/checkout@v4
 
@@ -45,11 +42,11 @@ jobs:
             echo "⚠️ Warning: No package lock file found"
           fi
 
-      - name: Setup Node.js ${{ matrix.node }}
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node }}
-          cache: 'npm'
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
 
       - name: Install dependencies
         run: npm ci
@@ -63,17 +60,16 @@ jobs:
 
       - name: Create deployment package
         run: |
-          rm -f ${{ env.ZIP_NAME }}
-          zip -r ${{ env.ZIP_NAME }} \
-            ${{ env.AZURE_WEBAPP_PACKAGE_PATH }} \
+          rm -f "${{ env.ZIP_NAME }}"
+          zip -r "${{ env.ZIP_NAME }}" . \
             -x ".git/*" ".gitignore" "node_modules/*" "*.zip" ".env*" \
             "**/.DS_Store" "**/.vscode/*" "**/dist/*"
-          
+
           if [ ! -f "${{ env.ZIP_NAME }}" ]; then
             echo "❌ ERROR: Failed to create deployment package"
             exit 1
           fi
-          
+
           size=$(du -h "${{ env.ZIP_NAME }}" | cut -f1)
           echo "✅ Deployment package created: $size"
 
@@ -88,8 +84,9 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     environment:
-      name: 'Production'
+      name: "Production"
       url: ${{ steps.deploy.outputs.webapp-url }}
+
     steps:
       - name: Download artifact
         uses: actions/download-artifact@v4
@@ -105,35 +102,13 @@ jobs:
           fi
           echo "✅ Artifact verified: $(du -h ${{ env.ZIP_NAME }})"
 
-      - name: Extract deployment package
-        run: |
-          mkdir -p deploy_package
-          unzip -q -o "${{ env.ZIP_NAME }}" -d deploy_package
-          
-          if [ ! -d "deploy_package" ] || [ -z "$(ls -A deploy_package)" ]; then
-            echo "❌ ERROR: Failed to extract deployment package"
-            exit 1
-          fi
-          echo "✅ Package extracted successfully"
-
-      - name: Determine deployment method
-        id: auth-method
-        run: |
-          if [ -n "${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}" ]; then
-            echo "method=publish-profile" >> $GITHUB_OUTPUT
-            echo "ℹ️  Using publish profile authentication"
-          else
-            echo "method=credentials" >> $GITHUB_OUTPUT
-            echo "ℹ️  Using service principal authentication"
-          fi
-
       - name: Deploy to Azure Web App
         id: deploy
         uses: azure/webapps-deploy@v2
         with:
           app-name: ${{ env.AZURE_WEBAPP_NAME }}
-          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE || secrets.AZURE_CREDENTIALS }}
-          package: ./deploy_package
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          package: ./${{ env.ZIP_NAME }}
 
       - name: Health check — Wait for app to respond
         id: health-check
@@ -141,30 +116,29 @@ jobs:
           app_url="https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net/"
           max_attempts=30
           attempt=1
-          
+
           echo "🔍 Starting health check for $app_url"
-          
+
           while [ $attempt -le $max_attempts ]; do
             status=$(curl -s -o /dev/null -w "%{http_code}" "$app_url" 2>/dev/null || echo "000")
-            
+
             if [ "$status" = "200" ]; then
               echo "✅ App responded with 200 OK (attempt $attempt/$max_attempts)"
               echo "url=$app_url" >> $GITHUB_OUTPUT
               exit 0
             fi
-            
+
             if [ $((attempt % 5)) -eq 0 ]; then
               echo "ℹ️  Attempt $attempt/$max_attempts (status=$status)"
             fi
-            
+
             attempt=$((attempt + 1))
             sleep 10
           done
-          
+
           echo "⚠️  WARNING: App did not respond with 200 after $((max_attempts * 10)) seconds"
-          echo "ℹ️  App may still be starting. Check Azure portal for details."
           echo "url=$app_url" >> $GITHUB_OUTPUT
-          exit 0  # Don't fail the workflow for health check timeouts
+          exit 0
 
       - name: Deployment summary
         if: always()
@@ -172,10 +146,8 @@ jobs:
           echo "📋 Deployment Summary"
           echo "===================="
           echo "App Name: ${{ env.AZURE_WEBAPP_NAME }}"
-          echo "Auth Method: ${{ steps.auth-method.outputs.method }}"
           echo "Status: ${{ job.status }}"
           echo "Deployment Package: ${{ env.ZIP_NAME }}"
-          echo ""
           echo "✅ Deployment completed. Monitor app performance in Azure Portal."
 
       - name: Upload deployment logs on failure
@@ -183,6 +155,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: deployment-logs
-          path: |
-            .
+          path: .
           retention-days: 7
